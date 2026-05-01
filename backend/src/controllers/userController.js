@@ -1,9 +1,13 @@
 import { validationResult } from "express-validator";
 import User from "../models/User.js";
+import { archiveDocument } from "../utils/archive.js";
+import { normalizeStaffPermissions } from "../utils/staffPermissions.js";
 
 // Admin sees all users; staff sees only role=user accounts
 export const getUsers = async (req, res) => {
-  const filter = req.user.role === "admin" ? {} : { role: "user" };
+  const filter = req.user.role === "admin"
+    ? { isArchived: { $ne: true } }
+    : { role: "user", isArchived: { $ne: true } };
   const users = await User.find(filter).select("-password").sort({ createdAt: -1 });
   res.json(users);
 };
@@ -15,36 +19,46 @@ export const createUser = async (req, res) => {
     return res.status(400).json({ errors: errors.array() });
   }
 
-  const { name, email, password, role } = req.body;
+  const { name, email, password, role, staffPermissions } = req.body;
+  const nextRole = role || "user";
 
   // Staff cannot create admin or staff accounts
-  if (req.user.role === "staff" && role !== "user") {
+  if (req.user.role === "staff" && nextRole !== "user") {
     return res.status(403).json({ message: "Staff can only create customer accounts" });
   }
 
-  const exists = await User.findOne({ email });
+  const exists = await User.findOne({ email, isArchived: { $ne: true } });
   if (exists) {
     return res.status(400).json({ message: "Email already registered" });
   }
 
-  const user = await User.create({ name, email, password, role });
+  const user = await User.create({
+    name,
+    email,
+    password,
+    role: nextRole,
+    ...(req.user.role === "admin" && nextRole === "staff"
+      ? { staffPermissions: normalizeStaffPermissions(staffPermissions) }
+      : {})
+  });
 
   res.status(201).json({
     id: user._id,
     name: user.name,
     email: user.email,
     role: user.role,
-    isActive: user.isActive
+    isActive: user.isActive,
+    staffPermissions: user.staffPermissions
   });
 };
 
 // Admin can update anyone; staff can only update role=user accounts
 export const updateUser = async (req, res) => {
   const { id } = req.params;
-  const { name, email, role, isActive } = req.body;
+  const { name, email, role, isActive, staffPermissions } = req.body;
 
   const user = await User.findById(id);
-  if (!user) return res.status(404).json({ message: "User not found" });
+  if (!user || user.isArchived) return res.status(404).json({ message: "User not found" });
 
   // Staff cannot modify admin or staff accounts
   if (req.user.role === "staff" && user.role !== "user") {
@@ -58,8 +72,14 @@ export const updateUser = async (req, res) => {
 
   user.name = name ?? user.name;
   user.email = email ?? user.email;
-  if (req.user.role === "admin") user.role = role ?? user.role;
+  const nextRole = req.user.role === "admin" ? (role ?? user.role) : user.role;
+  if (req.user.role === "admin") user.role = nextRole;
   if (typeof isActive === "boolean") user.isActive = isActive;
+  if (req.user.role === "admin") {
+    user.staffPermissions = nextRole === "staff"
+      ? normalizeStaffPermissions(staffPermissions ?? user.staffPermissions)
+      : normalizeStaffPermissions(user.staffPermissions);
+  }
 
   await user.save();
 
@@ -68,7 +88,8 @@ export const updateUser = async (req, res) => {
     name: user.name,
     email: user.email,
     role: user.role,
-    isActive: user.isActive
+    isActive: user.isActive,
+    staffPermissions: user.staffPermissions
   });
 };
 
@@ -76,7 +97,12 @@ export const updateUser = async (req, res) => {
 export const deleteUser = async (req, res) => {
   const { id } = req.params;
   const user = await User.findById(id);
-  if (!user) return res.status(404).json({ message: "User not found" });
-  await user.deleteOne();
-  res.json({ message: "User removed" });
+  if (!user || user.isArchived) return res.status(404).json({ message: "User not found" });
+  await archiveDocument({
+    doc: user,
+    entityType: "user",
+    deletedBy: req.user,
+    reason: req.body?.reason
+  });
+  res.json({ message: "User moved to archive" });
 };

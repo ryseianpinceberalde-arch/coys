@@ -1,5 +1,10 @@
 import React, { useEffect, useRef } from "react";
 
+const currencyFormatter = new Intl.NumberFormat("en-PH", {
+  style: "currency",
+  currency: "PHP",
+});
+
 const SimpleChart = ({ data }) => {
   const barsRef = useRef([]);
 
@@ -33,7 +38,11 @@ const SimpleChart = ({ data }) => {
       {data.map((d, i) => {
         const pct = `${((d.value / max) * 100) || 0}%`;
         return (
-          <div key={d.label} className="chart-bar" title={`$${d.value?.toFixed?.(2) ?? d.value}`}>
+          <div
+            key={d.label}
+            className="chart-bar"
+            title={currencyFormatter.format(Number(d.value || 0))}
+          >
             <div
               ref={(el) => (barsRef.current[i] = el)}
               className="chart-bar-inner"

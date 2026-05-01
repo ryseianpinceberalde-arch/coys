@@ -1,5 +1,7 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Layout from "../components/Layout.jsx";
+import Modal from "../components/Modal.jsx";
 import { useToast } from "../context/ToastContext.jsx";
 import api from "../utils/api";
 
@@ -20,9 +22,45 @@ const foodEmoji = (name) => {
 };
 
 const emptyCart = [];
+const PAYMENT_LABELS = {
+  cash: "Cash",
+  gcash: "GCash",
+  qrph: "GCash QR",
+  card: "Card",
+  stripe: "Stripe"
+};
+const isHostedPosPaymentMethod = (paymentMethod) =>
+  ["gcash", "qrph", "card", "stripe"].includes(String(paymentMethod || "").toLowerCase());
+
+const stripeQrCodeUrl = (paymentUrl) =>
+  paymentUrl
+    ? `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(paymentUrl)}`
+    : "";
+
+const buildStripeReturnUrl = (status, includeSessionId = false) => {
+  if (typeof window === "undefined" || !window.location?.origin) {
+    return "";
+  }
+
+  const base = `${window.location.origin}/api/payments/stripe/return?status=${encodeURIComponent(status)}&source=pos`;
+  return includeSessionId ? `${base}&session_id={CHECKOUT_SESSION_ID}` : base;
+};
+
+const paymentStatusBadge = (status) => {
+  if (status === "paid") return "badge-green";
+  if (status === "pending") return "badge-amber";
+  if (status === "expired" || status === "failed") return "badge-red";
+  return "badge-blue";
+};
+
+const formatPaymentStatus = (status) =>
+  String(status || "pending")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (value) => value.toUpperCase());
 
 const PosPage = () => {
   const toast = useToast();
+  const navigate = useNavigate();
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [cart, setCart] = useState(emptyCart);
@@ -32,10 +70,14 @@ const PosPage = () => {
   const [discountValue, setDiscountValue] = useState("");
   const [taxRate, setTaxRate] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [checkoutPaymentMethods, setCheckoutPaymentMethods] = useState(["cash"]);
   const [amountReceived, setAmountReceived] = useState("");
   const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [stripeSale, setStripeSale] = useState(null);
+  const [stripeModalOpen, setStripeModalOpen] = useState(false);
+  const [syncingStripeSale, setSyncingStripeSale] = useState(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -45,9 +87,13 @@ const PosPage = () => {
         api.get("/settings").catch(() => ({ data: { taxRate: 0 } }))
       ]);
       const prods = Array.isArray(prodRes.data) ? prodRes.data : (prodRes.data.products || []);
+      const configuredCheckoutMethods = Array.isArray(settingsRes.data?.paymentMethods)
+        ? settingsRes.data.paymentMethods
+        : ["cash"];
       setProducts(prods.filter(p => p.isActive && !p.isArchived));
       setCategories(catRes.data);
       setTaxRate(settingsRes.data.taxRate || 0);
+      setCheckoutPaymentMethods(configuredCheckoutMethods);
     } catch {
       toast.error("Failed to load products");
     } finally {
@@ -56,6 +102,23 @@ const PosPage = () => {
   }, [toast]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  const availablePaymentMethods = useMemo(() => {
+    const configured = Array.isArray(checkoutPaymentMethods) && checkoutPaymentMethods.length
+      ? checkoutPaymentMethods
+      : ["cash"];
+    const preferredOrder = ["cash", "gcash", "qrph", "card", "stripe"];
+
+    return preferredOrder.filter((method) => configured.includes(method));
+  }, [checkoutPaymentMethods]);
+
+  useEffect(() => {
+    if (availablePaymentMethods.includes(paymentMethod)) {
+      return;
+    }
+
+    setPaymentMethod("cash");
+  }, [availablePaymentMethods, paymentMethod]);
 
   const filtered = products.filter(p => {
     const matchCat = selectedCat === "all" || p.category?._id === selectedCat || p.category === selectedCat;
@@ -117,6 +180,78 @@ const PosPage = () => {
   const received = parseFloat(amountReceived || 0);
   const change = paymentMethod === "cash" ? Math.max(0, received - total) : 0;
 
+  const syncStripeSale = useCallback(async ({ silent = false } = {}) => {
+    if (!stripeSale?._id) {
+      return null;
+    }
+
+    if (!silent) {
+      setSyncingStripeSale(true);
+    }
+
+    try {
+      const res = await api.get(`/sales/${stripeSale._id}`);
+      const nextSale = res.data;
+
+      setStripeSale(nextSale);
+
+      if (nextSale.paymentStatus === "paid" || nextSale.status === "completed") {
+        setStripeModalOpen(false);
+        setStripeSale(null);
+        toast.success(`Payment received for ${nextSale.invoiceNumber}`);
+        await loadData();
+        navigate(`/receipt/${nextSale._id}`);
+      }
+
+      return nextSale;
+    } catch (err) {
+      if (!silent) {
+        toast.error(err.response?.data?.message || "Unable to refresh Stripe payment status");
+      }
+
+      return null;
+    } finally {
+      if (!silent) {
+        setSyncingStripeSale(false);
+      }
+    }
+  }, [loadData, navigate, stripeSale?._id, toast]);
+
+  useEffect(() => {
+    if (!stripeModalOpen || !stripeSale?._id || stripeSale.paymentStatus === "paid") {
+      return undefined;
+    }
+
+    syncStripeSale({ silent: true });
+
+    const interval = window.setInterval(() => {
+      syncStripeSale({ silent: true });
+    }, 4000);
+
+    return () => window.clearInterval(interval);
+  }, [stripeModalOpen, stripeSale?._id, stripeSale?.paymentStatus, syncStripeSale]);
+
+  const openStripeCheckout = useCallback(() => {
+    if (!stripeSale?.paymentUrl) {
+      return;
+    }
+
+    window.open(stripeSale.paymentUrl, "_blank", "noopener,noreferrer");
+  }, [stripeSale?.paymentUrl]);
+
+  const copyStripeCheckoutLink = useCallback(async () => {
+    if (!stripeSale?.paymentUrl) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(stripeSale.paymentUrl);
+      toast.success("Payment link copied");
+    } catch {
+      toast.error("Unable to copy the payment link");
+    }
+  }, [stripeSale?.paymentUrl, toast]);
+
   const handleCheckout = async () => {
     if (cart.length === 0) return;
     setSubmitting(true);
@@ -127,12 +262,29 @@ const PosPage = () => {
         discountValue: parseFloat(discountValue || 0),
         taxRate,
         paymentMethod,
-        paymentReceived: paymentMethod === "cash" ? received : total,
-        notes
+        paymentReceived: paymentMethod === "cash" ? received : isHostedPosPaymentMethod(paymentMethod) ? 0 : total,
+        notes,
+        ...(paymentMethod === "stripe"
+          ? {
+              successUrl: buildStripeReturnUrl("success", true),
+              cancelUrl: buildStripeReturnUrl("cancel")
+            }
+          : {})
       });
+
+      if (isHostedPosPaymentMethod(paymentMethod)) {
+        setStripeSale(res.data);
+        setStripeModalOpen(true);
+        toast.info(`Invoice ${res.data.invoiceNumber} is waiting for ${PAYMENT_LABELS[paymentMethod] || "online"} payment`);
+        clearCart();
+        loadData();
+        return;
+      }
+
       toast.success(`Sale complete! Invoice: ${res.data.invoiceNumber}`);
       clearCart();
       loadData();
+      navigate(`/receipt/${res.data._id}`);
     } catch (err) {
       toast.error(err.response?.data?.message || "Checkout failed");
     } finally {
@@ -166,7 +318,7 @@ const PosPage = () => {
                 borderRadius: "999px",
                 border: "1px solid var(--border)",
                 background: selectedCat === "all" ? "var(--accent)" : "var(--bg2)",
-                color: selectedCat === "all" ? "#fff" : "var(--text2)",
+                color: selectedCat === "all" ? "var(--accent-ink)" : "var(--text2)",
                 cursor: "pointer",
                 fontSize: "0.78rem",
                 fontWeight: 600,
@@ -185,7 +337,7 @@ const PosPage = () => {
                   borderRadius: "999px",
                   border: "1px solid var(--border)",
                   background: selectedCat === c._id ? "var(--accent)" : "var(--bg2)",
-                  color: selectedCat === c._id ? "#fff" : "var(--text2)",
+                  color: selectedCat === c._id ? "var(--accent-ink)" : "var(--text2)",
                   cursor: "pointer",
                   fontSize: "0.78rem",
                   fontWeight: 600,
@@ -249,7 +401,7 @@ const PosPage = () => {
               {cart.length > 0 && (
                 <span style={{
                   background: "var(--accent)",
-                  color: "#fff",
+                  color: "var(--accent-ink)",
                   borderRadius: "999px",
                   fontSize: "0.72rem",
                   fontWeight: 700,
@@ -356,16 +508,22 @@ const PosPage = () => {
 
             {/* Payment Method */}
             <div style={{ display: "flex", gap: "0.4rem" }}>
-              {["cash", "gcash", "card"].map(m => (
+              {availablePaymentMethods.map(m => (
                 <button
                   key={m}
                   className={`pay-tab${paymentMethod === m ? " active" : ""}`}
                   onClick={() => setPaymentMethod(m)}
                 >
-                  {m === "cash" ? "💵 Cash" : m === "gcash" ? "📱 GCash" : "💳 Card"}
+                  {PAYMENT_LABELS[m] || m}
                 </button>
               ))}
             </div>
+
+            {isHostedPosPaymentMethod(paymentMethod) && (
+              <div style={{ fontSize: "0.78rem", color: "var(--text3)", lineHeight: 1.5 }}>
+                {`${PAYMENT_LABELS[paymentMethod] || "Online"} creates a hosted checkout link for this sale. Show the QR code or open the payment page for the customer.`}
+              </div>
+            )}
 
             {/* Amount Received (cash only) */}
             {paymentMethod === "cash" && (
@@ -404,11 +562,97 @@ const PosPage = () => {
               disabled={cart.length === 0 || submitting || (paymentMethod === "cash" && amountReceived !== "" && received < total)}
               style={{ width: "100%", padding: "0.875rem", fontSize: "0.95rem", fontWeight: 700 }}
             >
-              {submitting ? "Processing…" : `Complete Sale — ${fmt(total)}`}
+              {submitting
+                ? "Processing..."
+                : isHostedPosPaymentMethod(paymentMethod)
+                  ? `Create ${PAYMENT_LABELS[paymentMethod] || "Online"} Checkout - ${fmt(total)}`
+                  : `Complete Sale - ${fmt(total)}`}
             </button>
           </div>
         </div>
       </div>
+      <Modal
+        isOpen={stripeModalOpen}
+        onClose={() => setStripeModalOpen(false)}
+        title={stripeSale ? `${PAYMENT_LABELS[stripeSale.paymentMethod] || "Online"} Checkout: ${stripeSale.invoiceNumber}` : "Online Checkout"}
+        size="md"
+      >
+        {stripeSale && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+              <div>
+                <div style={{ color: "var(--text3)", fontSize: "0.75rem", marginBottom: "0.2rem" }}>INVOICE</div>
+                <div style={{ fontWeight: 800, fontSize: "1rem" }}>{stripeSale.invoiceNumber}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <div style={{ color: "var(--text3)", fontSize: "0.75rem", marginBottom: "0.2rem" }}>TOTAL</div>
+                <div style={{ fontWeight: 800, fontSize: "1rem", color: "var(--accent)" }}>{fmt(stripeSale.total)}</div>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+              <span className={`badge ${paymentStatusBadge(stripeSale.paymentStatus)}`}>
+                {formatPaymentStatus(stripeSale.paymentStatus)}
+              </span>
+              <span style={{ color: "var(--text3)", fontSize: "0.78rem" }}>
+                This sale stays pending until the payment provider confirms payment.
+              </span>
+            </div>
+
+            <div style={{ color: "var(--text2)", lineHeight: 1.6 }}>
+              {stripeSale.paymentMethod === "gcash"
+                ? "Have the customer scan this QR code with their phone. It opens the GCash checkout page so they can pay immediately."
+                : stripeSale.paymentMethod === "qrph"
+                  ? "Have the customer scan this QR code with GCash or another QR Ph wallet to complete payment."
+                : stripeSale.paymentMethod === "card"
+                  ? "Open this hosted card checkout on the customer's device, or let them scan the QR code to continue on their phone."
+                  : "Have the customer scan this QR code with their phone. It opens the hosted checkout so they can pay without typing the link manually."}
+            </div>
+
+            {stripeSale.paymentUrl ? (
+              <div style={{ alignSelf: "center", background: "#fff", padding: "0.9rem", borderRadius: "1rem", border: "1px solid var(--border)" }}>
+                <img
+                  src={stripeQrCodeUrl(stripeSale.paymentUrl)}
+                  alt={`${PAYMENT_LABELS[stripeSale.paymentMethod] || "Online"} checkout QR for ${stripeSale.invoiceNumber}`}
+                  style={{ display: "block", width: 280, height: 280, maxWidth: "100%" }}
+                />
+              </div>
+            ) : (
+              <div style={{ padding: "1rem", borderRadius: "1rem", background: "var(--bg2)", color: "var(--text3)" }}>
+                Waiting for checkout link...
+              </div>
+            )}
+
+            <div style={{ color: "var(--text3)", fontSize: "0.78rem", lineHeight: 1.5 }}>
+              If the QR image does not load, use the payment link below or open the checkout directly on this device.
+            </div>
+
+            <div style={{ padding: "0.9rem", borderRadius: "1rem", background: "var(--bg2)", border: "1px solid var(--border)", wordBreak: "break-all", fontSize: "0.78rem", color: "var(--text2)" }}>
+              {stripeSale.paymentUrl || "No payment link available yet."}
+            </div>
+
+            <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+              <button className="btn primary" onClick={openStripeCheckout} disabled={!stripeSale.paymentUrl}>
+                {stripeSale.paymentMethod === "gcash"
+                  ? "Open GCash"
+                  : stripeSale.paymentMethod === "qrph"
+                    ? "Open GCash QR"
+                    : "Open Checkout"}
+              </button>
+              <button className="btn btn-ghost" onClick={copyStripeCheckoutLink} disabled={!stripeSale.paymentUrl}>
+                Copy Link
+              </button>
+              <button className="btn btn-ghost" onClick={() => syncStripeSale()} disabled={syncingStripeSale}>
+                {syncingStripeSale ? "Refreshing..." : "Refresh Status"}
+              </button>
+            </div>
+
+            <div style={{ color: "var(--text3)", fontSize: "0.78rem", lineHeight: 1.5 }}>
+              Closing this dialog does not cancel the sale. You can reopen the pending payment from History until it is paid or cancelled.
+            </div>
+          </div>
+        )}
+      </Modal>
     </Layout>
   );
 };

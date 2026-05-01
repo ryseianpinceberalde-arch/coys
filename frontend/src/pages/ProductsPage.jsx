@@ -21,7 +21,6 @@ const emptyForm = {
   barcode: "",
   description: "",
   isActive: true,
-  isArchived: false,
   imageUrl: ""
 };
 
@@ -111,7 +110,6 @@ const ProductsPage = () => {
       barcode: p.barcode || "",
       description: p.description || "",
       isActive: p.isActive,
-      isArchived: p.isArchived || false,
       imageUrl: p.imageUrl || ""
     });
     setImageFile(null);
@@ -146,7 +144,6 @@ const ProductsPage = () => {
       fd.append("reorderLevel", parseInt(form.reorderLevel || 10));
       fd.append("unit", form.unit);
       fd.append("isActive", form.isActive);
-      fd.append("isArchived", form.isArchived);
       if (form.sku) fd.append("sku", form.sku);
       if (form.barcode) fd.append("barcode", form.barcode);
       if (form.brand) fd.append("brand", form.brand);
@@ -175,10 +172,10 @@ const ProductsPage = () => {
   const handleDelete = async () => {
     try {
       await api.delete(`/products/${deleteTarget._id}`);
-      toast.success("Product deleted");
+      toast.success("Product moved to archive");
       load();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to delete");
+      toast.error(err.response?.data?.message || "Failed to archive");
     }
   };
 
@@ -265,8 +262,8 @@ const ProductsPage = () => {
                   <span style={{ fontWeight: 700, color: stockColor(p) }}>{p.stockQuantity}</span>
                 </td>
                 <td>
-                  <span className={`badge ${p.isActive && !p.isArchived ? "badge-green" : p.isArchived ? "badge-red" : "badge-amber"}`}>
-                    {p.isArchived ? "Archived" : p.isActive ? "Active" : "Inactive"}
+                  <span className={`badge ${p.isActive ? "badge-green" : "badge-amber"}`}>
+                    {p.isActive ? "Active" : "Inactive"}
                   </span>
                 </td>
                 <td>
@@ -408,10 +405,6 @@ const ProductsPage = () => {
               <input type="checkbox" checked={form.isActive} onChange={setCheck("isActive")} style={{ width: "auto", marginTop: 0 }} />
               Active
             </label>
-            <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer", fontSize: "0.9rem" }}>
-              <input type="checkbox" checked={form.isArchived} onChange={setCheck("isArchived")} style={{ width: "auto", marginTop: 0 }} />
-              Archived
-            </label>
           </div>
 
           <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
@@ -425,9 +418,9 @@ const ProductsPage = () => {
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
-        title="Delete Product"
-        message={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
-        confirmLabel="Delete"
+        title="Archive Product"
+        message={`Move "${deleteTarget?.name}" to Archive? You can restore it later.`}
+        confirmLabel="Move to Archive"
       />
     </Layout>
   );

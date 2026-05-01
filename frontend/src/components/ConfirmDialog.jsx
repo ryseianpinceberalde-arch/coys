@@ -17,7 +17,7 @@ const ConfirmDialog = ({
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title={title} size="sm">
-      <p style={{ color: "var(--text2)", lineHeight: 1.6, marginBottom: "1.5rem" }}>{message}</p>
+      <div style={{ color: "var(--text2)", lineHeight: 1.6, marginBottom: "1.5rem" }}>{message}</div>
       <div style={{ display: "flex", gap: "0.75rem", justifyContent: "flex-end" }}>
         <button
           className="btn btn-ghost btn-sm"
@@ -31,7 +31,7 @@ const ConfirmDialog = ({
           style={
             variant === "danger"
               ? { background: "var(--red)", color: "#fff", border: "1px solid var(--red)" }
-              : { background: "var(--accent)", color: "#fff", border: "1px solid var(--accent)" }
+              : { background: "var(--accent)", color: "var(--accent-ink)", border: "1px solid var(--accent)" }
           }
         >
           {confirmLabel}

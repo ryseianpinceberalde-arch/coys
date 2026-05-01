@@ -60,10 +60,10 @@ const BrandsPage = () => {
   const handleDelete = async () => {
     try {
       await api.delete(`/brands/${deleteTarget._id}`);
-      toast.success("Brand deleted");
+      toast.success("Brand moved to archive");
       load();
     } catch (err) {
-      toast.error(err.response?.data?.message || "Failed to delete");
+      toast.error(err.response?.data?.message || "Failed to archive");
     }
   };
 
@@ -169,9 +169,9 @@ const BrandsPage = () => {
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={handleDelete}
-        title="Delete Brand"
-        message={`Are you sure you want to delete "${deleteTarget?.name}"? This cannot be undone.`}
-        confirmLabel="Delete"
+        title="Archive Brand"
+        message={`Move "${deleteTarget?.name}" to Archive? You can restore it later.`}
+        confirmLabel="Move to Archive"
       />
     </Layout>
   );

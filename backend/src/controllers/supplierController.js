@@ -1,9 +1,10 @@
 import Supplier from "../models/Supplier.js";
 import { validationResult } from "express-validator";
+import { archiveDocument } from "../utils/archive.js";
 
 export const getSuppliers = async (req, res) => {
   try {
-    const suppliers = await Supplier.find().sort({ name: 1 });
+    const suppliers = await Supplier.find({ isArchived: { $ne: true } }).sort({ name: 1 });
     res.json(suppliers);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -23,7 +24,11 @@ export const createSupplier = async (req, res) => {
 
 export const updateSupplier = async (req, res) => {
   try {
-    const supplier = await Supplier.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const supplier = await Supplier.findOneAndUpdate(
+      { _id: req.params.id, isArchived: { $ne: true } },
+      req.body,
+      { new: true, runValidators: true }
+    );
     if (!supplier) return res.status(404).json({ message: "Supplier not found" });
     res.json(supplier);
   } catch (err) {
@@ -33,9 +38,15 @@ export const updateSupplier = async (req, res) => {
 
 export const deleteSupplier = async (req, res) => {
   try {
-    const supplier = await Supplier.findByIdAndDelete(req.params.id);
+    const supplier = await Supplier.findOne({ _id: req.params.id, isArchived: { $ne: true } });
     if (!supplier) return res.status(404).json({ message: "Supplier not found" });
-    res.json({ message: "Supplier deleted" });
+    await archiveDocument({
+      doc: supplier,
+      entityType: "supplier",
+      deletedBy: req.user,
+      reason: req.body?.reason
+    });
+    res.json({ message: "Supplier moved to archive" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

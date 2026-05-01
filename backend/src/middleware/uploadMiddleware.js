@@ -35,7 +35,7 @@ export const uploadProduct = multer({
 export const uploadLogo = multer({
   storage: makeStorage("logo"),
   fileFilter,
-  limits: { fileSize: 2 * 1024 * 1024 } // 2 MB for logo
+  limits: { fileSize: 5 * 1024 * 1024 } // 5 MB for logo
 });
 
 // Default export kept for backward compatibility

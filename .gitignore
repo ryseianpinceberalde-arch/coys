@@ -5,3 +5,13 @@ dist/
 *.log
 uploads/
 .claude/
+.expo/
+.vscode/
+.gradle-user-home/
+.gradle-user-home-phone/
+.gradle-user-home-release/
+android/.gradle-user/
+backend/mongo_data/
+mongo-merged-copy/
+mongo-service-copy/
+mongo-temp-copy/

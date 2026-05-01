@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import api from "../utils/api";
 import { useAuth } from "../state/AuthContext.jsx";
 import { useSettings } from "../context/SettingsContext.jsx";
@@ -24,13 +24,16 @@ function foodEmoji(name = "") {
 }
 
 const MenuPage = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, logout } = useAuth();
   const { settings } = useSettings();
+  const hasLogo = Boolean(settings?.logoUrl);
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+  const [selectedProduct, setSelectedProduct] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -39,8 +42,9 @@ const MenuPage = () => {
           api.get("/products"),
           api.get("/categories"),
         ]);
-        setProducts(pr.data);
-        setCategories(cr.data);
+        const nextProducts = Array.isArray(pr.data) ? pr.data : (pr.data.products || []);
+        setProducts(nextProducts.filter((product) => product.isActive !== false && !product.isArchived));
+        setCategories(Array.isArray(cr.data) ? cr.data : []);
       } finally {
         setLoading(false);
       }
@@ -48,8 +52,17 @@ const MenuPage = () => {
     load();
   }, []);
 
+  useEffect(() => {
+    setSelectedCategory(searchParams.get("category") || "");
+  }, [searchParams]);
+
+  const handleCategoryChange = (categoryId) => {
+    setSelectedCategory(categoryId);
+    setSearchParams(categoryId ? { category: categoryId } : {});
+  };
+
   const filtered = products.filter((p) => {
-    const matchCat = !selectedCategory || p.category?._id === selectedCategory;
+    const matchCat = !selectedCategory || p.category?._id === selectedCategory || p.category === selectedCategory;
     const matchSearch = !search || p.name.toLowerCase().includes(search.toLowerCase());
     return matchCat && matchSearch;
   });
@@ -59,9 +72,9 @@ const MenuPage = () => {
       {/* Header */}
       <header className="menu-header">
         <div className="menu-header-logo">
-          <div className="logo-icon" style={{ overflow: "hidden", borderRadius: settings?.logoUrl ? "0.5rem" : undefined }}>
-            {settings?.logoUrl
-              ? <img src={settings.logoUrl} alt="logo" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          <div className={`logo-icon${hasLogo ? " logo-icon--image" : ""}`} style={{ overflow: "hidden", borderRadius: hasLogo ? "0.5rem" : undefined }}>
+            {hasLogo
+              ? <img src={settings.logoUrl} alt="logo" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
               : "🍽️"
             }
           </div>
@@ -99,7 +112,7 @@ const MenuPage = () => {
         <div className="category-pills">
           <button
             className={`cat-pill ${selectedCategory === "" ? "active" : ""}`}
-            onClick={() => setSelectedCategory("")}
+            onClick={() => handleCategoryChange("")}
           >
             All
           </button>
@@ -107,7 +120,7 @@ const MenuPage = () => {
             <button
               key={c._id}
               className={`cat-pill ${selectedCategory === c._id ? "active" : ""}`}
-              onClick={() => setSelectedCategory(c._id)}
+              onClick={() => handleCategoryChange(c._id)}
             >
               {c.name}
             </button>
@@ -129,7 +142,10 @@ const MenuPage = () => {
         <div className="menu-grid stagger">
           {filtered.map((p) => (
             <div key={p._id} className="food-card">
-              <div className="food-card-img">
+              <div
+                className="food-card-img food-card-img--clickable"
+                onClick={() => setSelectedProduct(p)}
+              >
                 {p.imageUrl
                   ? <img
                       src={p.imageUrl}
@@ -162,6 +178,50 @@ const MenuPage = () => {
       >
         © {new Date().getFullYear()} Coy's Corner · All rights reserved
       </div>
+
+      {/* ─── PRODUCT MODAL ─────────────────────────────── */}
+      {selectedProduct && (
+        <div
+          className="modal-backdrop"
+          onClick={() => setSelectedProduct(null)}
+        >
+          <div
+            className="modal-card"
+            onClick={e => e.stopPropagation()}
+          >
+            {/* Close */}
+            <button className="modal-close" onClick={() => setSelectedProduct(null)}>✕</button>
+
+            {/* Image */}
+            <div className="modal-img">
+              {selectedProduct.imageUrl
+                ? <img src={selectedProduct.imageUrl} alt={selectedProduct.name} />
+                : <span style={{ fontSize: "5rem" }}>{foodEmoji(selectedProduct.name)}</span>
+              }
+            </div>
+
+            {/* Details */}
+            <div className="modal-body">
+              {selectedProduct.category?.name && (
+                <div className="modal-cat">{selectedProduct.category.name}</div>
+              )}
+              <h2 className="modal-name">{selectedProduct.name}</h2>
+              <div className="modal-price">₱{selectedProduct.price.toFixed(2)}</div>
+              {selectedProduct.stockQuantity !== undefined && (
+                <div className="modal-stock">
+                  {selectedProduct.stockQuantity > 0
+                    ? <span style={{ color: "#22c55e" }}>✓ In Stock ({selectedProduct.stockQuantity} available)</span>
+                    : <span style={{ color: "#ef4444" }}>✗ Out of Stock</span>
+                  }
+                </div>
+              )}
+              {selectedProduct.description && (
+                <p className="modal-desc">{selectedProduct.description}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

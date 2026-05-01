@@ -1,11 +1,27 @@
+import fs from "fs/promises";
 import { validationResult } from "express-validator";
 import Product from "../models/Product.js";
 import InventoryLog from "../models/InventoryLog.js";
+import { archiveDocument } from "../utils/archive.js";
+
+const cleanupUploadedFile = async (file) => {
+  if (!file?.path) {
+    return;
+  }
+
+  try {
+    await fs.unlink(file.path);
+  } catch (error) {
+    if (error.code !== "ENOENT") {
+      console.error("Failed to remove orphaned product upload:", error.message);
+    }
+  }
+};
 
 export const getProducts = async (req, res) => {
   try {
     const { search } = req.query;
-    const query = { isArchived: false };
+    const query = { isArchived: { $ne: true } };
     if (search) {
       query.$or = [
         { name: new RegExp(search, "i") },
@@ -27,7 +43,7 @@ export const getProducts = async (req, res) => {
 export const getLowStockProducts = async (req, res) => {
   try {
     const products = await Product.find({
-      isArchived: false,
+      isArchived: { $ne: true },
       $expr: { $lte: ["$stockQuantity", "$reorderLevel"] }
     }).populate("category", "name");
     res.json(products);
@@ -89,6 +105,8 @@ export const createProduct = async (req, res) => {
 
     res.status(201).json(populated);
   } catch (err) {
+    console.error("Create product failed:", err);
+    await cleanupUploadedFile(req.file);
     if (err.code === 11000) return res.status(400).json({ message: "A product with that barcode or SKU already exists" });
     res.status(500).json({ message: err.message });
   }
@@ -156,6 +174,8 @@ export const updateProduct = async (req, res) => {
 
     res.json(populated);
   } catch (err) {
+    console.error("Update product failed:", err);
+    await cleanupUploadedFile(req.file);
     if (err.code === 11000) return res.status(400).json({ message: "A product with that barcode or SKU already exists" });
     res.status(500).json({ message: err.message });
   }
@@ -164,10 +184,15 @@ export const updateProduct = async (req, res) => {
 export const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const product = await Product.findById(id);
+    const product = await Product.findOne({ _id: id, isArchived: { $ne: true } });
     if (!product) return res.status(404).json({ message: "Product not found" });
-    await product.deleteOne();
-    res.json({ message: "Product removed" });
+    await archiveDocument({
+      doc: product,
+      entityType: "product",
+      deletedBy: req.user,
+      reason: req.body?.reason
+    });
+    res.json({ message: "Product moved to archive" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

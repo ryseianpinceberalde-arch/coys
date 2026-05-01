@@ -8,6 +8,6 @@ router.get("/", protect, authorizeRoles("admin", "staff"), getSales);
 router.get("/mine", protect, getMySales);
 router.get("/:id", protect, getSaleById);
 router.post("/", protect, authorizeRoles("admin", "staff"), createSale);
-router.post("/:id/cancel", protect, authorizeRoles("admin"), cancelSale);
+router.post("/:id/cancel", protect, authorizeRoles("admin", "staff"), cancelSale);
 
 export default router;

@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
-import api from "../utils/api";
+import React, { createContext, useCallback, useContext, useEffect, useState } from "react";
+import api, { resolveAssetUrl } from "../utils/api";
 
 const SettingsContext = createContext(null);
 
@@ -9,19 +9,24 @@ export const SettingsProvider = ({ children }) => {
     logoUrl: "",
     currency: "PHP",
     taxRate: 0,
-    receiptFooter: "Thank you for your purchase!"
+    receiptFooter: "Thank you for your purchase!",
   });
 
   const fetchSettings = useCallback(async () => {
     try {
-      const res = await api.get("/settings");
-      setSettings(res.data);
+      const res = await api.get("/settings/public");
+      setSettings({
+        ...res.data,
+        logoUrl: resolveAssetUrl(res.data.logoUrl),
+      });
     } catch {
-      // silently fail — defaults remain
+      // silently fail; defaults remain
     }
   }, []);
 
-  useEffect(() => { fetchSettings(); }, [fetchSettings]);
+  useEffect(() => {
+    fetchSettings();
+  }, [fetchSettings]);
 
   return (
     <SettingsContext.Provider value={{ settings, refreshSettings: fetchSettings, setSettings }}>

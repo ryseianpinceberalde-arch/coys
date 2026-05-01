@@ -33,7 +33,7 @@ const Pagination = ({ page, totalPages, onPageChange }) => {
   const activeBtn = {
     ...btnBase,
     background: "var(--accent)",
-    color: "#fff",
+    color: "var(--accent-ink)",
     border: "1px solid var(--accent)"
   };
 

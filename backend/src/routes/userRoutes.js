@@ -6,7 +6,7 @@ import {
   updateUser,
   deleteUser
 } from "../controllers/userController.js";
-import { protect, authorizeRoles } from "../middleware/authMiddleware.js";
+import { protect, authorizeRoles, authorizeStaffPermission } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
@@ -14,12 +14,13 @@ const router = express.Router();
 router.use(protect);
 
 // Admin sees everyone; staff sees only role=user accounts
-router.get("/", authorizeRoles("admin", "staff"), getUsers);
+router.get("/", authorizeRoles("admin", "staff"), authorizeStaffPermission("customers"), getUsers);
 
 // Admin can create any role; staff can only create role=user
 router.post(
   "/",
   authorizeRoles("admin", "staff"),
+  authorizeStaffPermission("customers"),
   [
     body("name").notEmpty(),
     body("email").isEmail(),
@@ -30,7 +31,7 @@ router.post(
 );
 
 // Admin can update anyone; staff can only update role=user accounts
-router.put("/:id", authorizeRoles("admin", "staff"), updateUser);
+router.put("/:id", authorizeRoles("admin", "staff"), authorizeStaffPermission("customers"), updateUser);
 
 // Only admin can delete
 router.delete("/:id", authorizeRoles("admin"), deleteUser);

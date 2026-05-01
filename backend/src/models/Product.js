@@ -51,7 +51,10 @@ const productSchema = new mongoose.Schema(
     },
     expirationDate: { type: Date },
     description: { type: String, default: "" },
-    isArchived: { type: Boolean, default: false }
+    isArchived: { type: Boolean, default: false },
+    archivedAt: { type: Date, default: null },
+    archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    archiveReason: { type: String, default: "" }
   },
   { timestamps: true }
 );

@@ -1,9 +1,10 @@
 import Brand from "../models/Brand.js";
 import { validationResult } from "express-validator";
+import { archiveDocument } from "../utils/archive.js";
 
 export const getBrands = async (req, res) => {
   try {
-    const brands = await Brand.find().sort({ name: 1 });
+    const brands = await Brand.find({ isArchived: { $ne: true } }).sort({ name: 1 });
     res.json(brands);
   } catch (err) {
     res.status(500).json({ message: err.message });
@@ -24,7 +25,11 @@ export const createBrand = async (req, res) => {
 
 export const updateBrand = async (req, res) => {
   try {
-    const brand = await Brand.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const brand = await Brand.findOneAndUpdate(
+      { _id: req.params.id, isArchived: { $ne: true } },
+      req.body,
+      { new: true, runValidators: true }
+    );
     if (!brand) return res.status(404).json({ message: "Brand not found" });
     res.json(brand);
   } catch (err) {
@@ -34,9 +39,15 @@ export const updateBrand = async (req, res) => {
 
 export const deleteBrand = async (req, res) => {
   try {
-    const brand = await Brand.findByIdAndDelete(req.params.id);
+    const brand = await Brand.findOne({ _id: req.params.id, isArchived: { $ne: true } });
     if (!brand) return res.status(404).json({ message: "Brand not found" });
-    res.json({ message: "Brand deleted" });
+    await archiveDocument({
+      doc: brand,
+      entityType: "brand",
+      deletedBy: req.user,
+      reason: req.body?.reason
+    });
+    res.json({ message: "Brand moved to archive" });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }

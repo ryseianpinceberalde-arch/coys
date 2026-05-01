@@ -117,13 +117,13 @@ const AdminDashboard = () => {
           )}
         </div>
 
-        {/* Recent Transactions */}
+        {/* Recent History */}
         <div className="section">
-          <h2>Recent Transactions</h2>
+          <h2>Recent History</h2>
           {!data?.recentTransactions?.length ? (
             <div className="card" style={{ textAlign: "center", padding: "2rem", color: "var(--text3)" }}>
               <div style={{ fontSize: "2rem", marginBottom: "0.5rem" }}>🧾</div>
-              <p>No transactions yet</p>
+              <p>No history yet</p>
             </div>
           ) : (
             <div className="table-wrap">
